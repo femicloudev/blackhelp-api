@@ -19,6 +19,7 @@ const UserSchema = new mongoose.Schema({
   name: String,
   email: { type: String, unique: true },
   password: String,
+  role: { type: String, enum: ["user", "admin"], default: "user" },
 });
 const User = mongoose.model("User", UserSchema);
 
@@ -28,7 +29,10 @@ const ProjectSchema = new mongoose.Schema({
   description: String,
   goal: Number,
   raised: { type: Number, default: 0 },
+  category: String,
+  milestones: [{ title: String, amount: Number, reached: { type: Boolean, default: false } }],
   owner: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  socialLinks: { facebook: String, twitter: String, linkedin: String },
 });
 const Project = mongoose.model("Project", ProjectSchema);
 
@@ -48,11 +52,11 @@ const authMiddleware = (req, res, next) => {
 
 // User Registration
 app.post("/register", async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, role } = req.body;
   const hashedPassword = await bcrypt.hash(password, 10);
 
   try {
-    const newUser = await User.create({ name, email, password: hashedPassword });
+    const newUser = await User.create({ name, email, password: hashedPassword, role });
     res.status(201).json({ message: "User created", user: newUser });
   } catch (error) {
     res.status(400).json({ error: "Email already exists" });
@@ -68,14 +72,14 @@ app.post("/login", async (req, res) => {
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) return res.status(400).json({ error: "Invalid credentials" });
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+  const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "1h" });
   res.json({ token });
 });
 
 // Create Project (Authenticated)
 app.post("/projects", authMiddleware, async (req, res) => {
-  const { title, description, goal } = req.body;
-  const project = await Project.create({ title, description, goal, owner: req.user.id });
+  const { title, description, goal, category, milestones, socialLinks } = req.body;
+  const project = await Project.create({ title, description, goal, category, milestones, socialLinks, owner: req.user.id });
   res.status(201).json(project);
 });
 
@@ -92,6 +96,12 @@ app.post("/projects/:id/donate", async (req, res) => {
   if (!project) return res.status(404).json({ error: "Project not found" });
 
   project.raised += amount;
+  project.milestones.forEach(milestone => {
+    if (project.raised >= milestone.amount) {
+      milestone.reached = true;
+    }
+  });
+
   await project.save();
   res.json({ message: "Donation successful", project });
 });
